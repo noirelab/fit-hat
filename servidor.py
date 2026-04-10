@@ -3,6 +3,7 @@ servidor.py — Backend de Inferência Gemma-4-Flex
 Requisitos: FastAPI, Uvicorn, PyTorch, psutil, transformers, flextensor, turboquant
 """
 
+import os
 import time
 import asyncio
 
@@ -10,6 +11,7 @@ import psutil
 import torch
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
@@ -181,6 +183,12 @@ async def metricas():
 # ---------------------------------------------------------------------------
 # Entry-point
 # ---------------------------------------------------------------------------
+@app.get("/")
+async def raiz():
+    """Serve a interface HTML."""
+    return FileResponse(os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html"))
+
+
 if __name__ == "__main__":
     import uvicorn
 
