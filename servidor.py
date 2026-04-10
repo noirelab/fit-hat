@@ -10,6 +10,7 @@ import psutil
 import torch
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
@@ -181,6 +182,12 @@ async def metricas():
 # ---------------------------------------------------------------------------
 # Entry-point
 # ---------------------------------------------------------------------------
+@app.get("/")
+async def raiz():
+    """Serve a interface HTML."""
+    return FileResponse("index.html")
+
+
 if __name__ == "__main__":
     import uvicorn
 
