@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gemma-4-Flex · Chat &amp; Dashboard</title>
+
+  <!-- TailwindCSS via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Chart.js via CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+
+  <style>
+    /* Scrollbar fina no tema escuro */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #1f2937; }
+    ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 3px; }
+  </style>
+</head>
+
+<body class="bg-gray-900 text-gray-100 h-screen flex flex-col overflow-hidden">
+
+  <!-- Cabeçalho -->
+  <header class="bg-gray-800 border-b border-gray-700 px-6 py-3 flex items-center gap-3 shrink-0">
+    <span class="text-2xl">🤖</span>
+    <h1 class="text-lg font-bold tracking-wide">Gemma-4-Flex <span class="text-indigo-400 font-normal text-sm">(31B · bfloat16 · RTX 5060 Ti)</span></h1>
+  </header>
+
+  <!-- Layout principal: chat (70%) + telemetria (30%) -->
+  <main class="flex flex-1 overflow-hidden">
+
+    <!-- ===== CHAT (esquerda — 70%) ===== -->
+    <section class="flex flex-col w-[70%] border-r border-gray-700">
+
+      <!-- Área de mensagens -->
+      <div id="chat-msgs"
+           class="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+        <!-- Mensagem de boas-vindas da IA -->
+        <div class="flex justify-start">
+          <div class="bg-gray-700 rounded-2xl rounded-tl-none px-4 py-3 max-w-[80%] text-sm leading-relaxed shadow">
+            Olá! Sou o <strong>Gemma 4 (31B)</strong> rodando com offloading FlexTensor e compressão de cache KV TurboQuant.
+            Como posso ajudar?
+          </div>
+        </div>
+      </div>
+
+      <!-- Input + botão -->
+      <div class="px-6 py-4 bg-gray-800 border-t border-gray-700 shrink-0">
+        <div class="flex gap-3">
+          <textarea
+            id="chat-input"
+            rows="2"
+            placeholder="Digite sua mensagem… (Enter para enviar, Shift+Enter para nova linha)"
+            class="flex-1 bg-gray-700 border border-gray-600 rounded-xl px-4 py-3 text-sm resize-none
+                   focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder-gray-400"></textarea>
+          <button
+            id="send-btn"
+            onclick="enviarMensagem()"
+            class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed
+                   text-white font-semibold px-5 rounded-xl transition-colors shrink-0 self-end py-3">
+            Enviar
+          </button>
+        </div>
+        <!-- Status de geração -->
+        <p id="status-msg" class="text-xs text-gray-500 mt-2 h-4"></p>
+      </div>
+    </section>
+
+    <!-- ===== TELEMETRIA (direita — 30%) ===== -->
+    <aside class="w-[30%] flex flex-col bg-gray-850 overflow-y-auto px-4 py-4 space-y-4"
+           style="background-color:#111827;">
+
+      <h2 class="text-sm font-bold uppercase tracking-widest text-gray-400">📊 Telemetria de Hardware</h2>
+
+      <!-- Cards de métricas -->
+      <div class="grid grid-cols-1 gap-3">
+
+        <!-- VRAM Ativa -->
+        <div class="bg-gray-800 rounded-xl p-4 border border-gray-700">
+          <p class="text-xs text-gray-400 uppercase tracking-wide mb-1">VRAM Ativa</p>
+          <p id="card-vram-active" class="text-3xl font-mono font-bold text-blue-400">—</p>
+          <p class="text-xs text-gray-500 mt-1">GB em uso pela GPU</p>
+        </div>
+
+        <!-- RAM do Sistema -->
+        <div class="bg-gray-800 rounded-xl p-4 border border-gray-700">
+          <p class="text-xs text-gray-400 uppercase tracking-wide mb-1">RAM Sistema</p>
+          <p id="card-system-ram" class="text-3xl font-mono font-bold text-yellow-400">—</p>
+          <p class="text-xs text-gray-500 mt-1">GB usados (inclui offload)</p>
+        </div>
+
+        <!-- Offloading -->
+        <div class="bg-gray-800 rounded-xl p-4 border border-gray-700">
+          <p class="text-xs text-gray-400 uppercase tracking-wide mb-1">Offloading p/ RAM</p>
+          <p id="card-offloading" class="text-3xl font-mono font-bold text-red-400">—</p>
+          <p class="text-xs text-gray-500 mt-1">GB do modelo na RAM</p>
+        </div>
+
+        <!-- TPS -->
+        <div class="bg-gray-800 rounded-xl p-4 border border-gray-700">
+          <p class="text-xs text-gray-400 uppercase tracking-wide mb-1">TPS</p>
+          <p id="card-tps" class="text-3xl font-mono font-bold text-green-400">—</p>
+          <p class="text-xs text-gray-500 mt-1">Tokens / segundo (última geração)</p>
+        </div>
+
+      </div>
+
+      <!-- Gráfico de linha em tempo real -->
+      <div class="bg-gray-800 rounded-xl p-4 border border-gray-700 flex-1">
+        <p class="text-xs text-gray-400 uppercase tracking-wide mb-3">Histórico (últimos 15s)</p>
+        <canvas id="mem-chart"></canvas>
+      </div>
+
+    </aside>
+  </main>
+
+  <!-- ================================================================= -->
+  <!-- JavaScript                                                          -->
+  <!-- ================================================================= -->
+  <script>
+    // -----------------------------------------------------------------------
+    // URL base da API — altere se o backend estiver em outro host/porta
+    // -----------------------------------------------------------------------
+    const API_BASE = '';   // Padrão: mesmo host/porta (ambos servidos pelo FastAPI)
+
+    // -----------------------------------------------------------------------
+    // Configuração do Chart.js — Gráfico de linha em tempo real
+    // -----------------------------------------------------------------------
+    const MAX_PONTOS = 30;   // 30 amostras × 500 ms = 15 segundos de histórico
+
+    // Inicializa arrays com zeros
+    const dadosVramActive   = Array(MAX_PONTOS).fill(0);
+    const dadosOffloading   = Array(MAX_PONTOS).fill(0);
+    const dadosVramReserved = Array(MAX_PONTOS).fill(0);
+
+    const ctx = document.getElementById('mem-chart').getContext('2d');
+    const chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        // Eixo X oculto — apenas um índice de tempo para cada ponto
+        labels: Array(MAX_PONTOS).fill(''),
+        datasets: [
+          {
+            label: 'VRAM Ativa (GB)',
+            data: dadosVramActive,
+            borderColor: '#60a5fa',       // Azul
+            backgroundColor: 'rgba(96,165,250,0.15)',
+            fill: true,
+            tension: 0.3,
+            borderWidth: 2,
+            pointRadius: 0,
+          },
+          {
+            label: 'Offloading RAM (GB)',
+            data: dadosOffloading,
+            borderColor: '#f87171',       // Vermelho
+            backgroundColor: 'rgba(248,113,113,0.10)',
+            fill: true,
+            borderDash: [5, 3],
+            tension: 0.3,
+            borderWidth: 2,
+            pointRadius: 0,
+          },
+          {
+            label: 'VRAM Reservada (GB)',
+            data: dadosVramReserved,
+            borderColor: '#4ade80',       // Verde
+            backgroundColor: 'transparent',
+            fill: false,
+            tension: 0.3,
+            borderWidth: 1.5,
+            pointRadius: 0,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        animation: false,           // Desativa animações para não onerar a CPU do navegador
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: {
+            labels: {
+              color: '#9ca3af',
+              boxWidth: 12,
+              font: { size: 11 },
+            },
+          },
+        },
+        scales: {
+          x: { display: false },    // Eixo X oculto conforme spec
+          y: {
+            min: 0,
+            max: 20,               // Limite de 20 GB para cobrir toda a VRAM + offload
+            ticks: {
+              color: '#9ca3af',
+              font: { size: 10 },
+              callback: (v) => v + ' GB',
+            },
+            grid: { color: 'rgba(255,255,255,0.05)' },
+          },
+        },
+      },
+    });
+
+    // -----------------------------------------------------------------------
+    // Polling de Telemetria — 500 ms (2 Hz)
+    // -----------------------------------------------------------------------
+    let ultimoTps = null;  // TPS é atualizado pela rota de inferência, não pela /metricas
+
+    async function buscarMetricas() {
+      try {
+        const res  = await fetch(API_BASE + '/metricas');
+        const data = await res.json();
+
+        // Atualiza cards de texto
+        document.getElementById('card-vram-active').textContent  = data.vram_active  + ' GB';
+        document.getElementById('card-system-ram').textContent   = data.system_ram   + ' GB';
+        document.getElementById('card-offloading').textContent   = data.offloading_gb + ' GB';
+        if (ultimoTps !== null) {
+          document.getElementById('card-tps').textContent = ultimoTps + ' t/s';
+        }
+
+        // Atualiza séries do gráfico: remove o ponto mais antigo e insere o novo
+        dadosVramActive.shift();   dadosVramActive.push(data.vram_active);
+        dadosOffloading.shift();   dadosOffloading.push(data.offloading_gb);
+        dadosVramReserved.shift(); dadosVramReserved.push(data.vram_reserved);
+
+        // 'none' desativa a animação desta atualização específica → zero overhead de CPU
+        chart.update('none');
+      } catch (_) {
+        // Ignora silenciosamente erros de rede (backend reiniciando, etc.)
+      }
+    }
+
+    setInterval(buscarMetricas, 500);   // 2 Hz
+    buscarMetricas();                   // Primeira chamada imediata
+
+    // -----------------------------------------------------------------------
+    // Chat — Envio de mensagem e exibição
+    // -----------------------------------------------------------------------
+    const chatMsgs  = document.getElementById('chat-msgs');
+    const chatInput = document.getElementById('chat-input');
+    const sendBtn   = document.getElementById('send-btn');
+    const statusMsg = document.getElementById('status-msg');
+
+    /** Cria e insere um balão de mensagem na área de chat */
+    function adicionarMensagem(texto, deQuem) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'flex ' + (deQuem === 'user' ? 'justify-end' : 'justify-start');
+
+      const balao = document.createElement('div');
+      balao.className = deQuem === 'user'
+        ? 'bg-indigo-600 rounded-2xl rounded-tr-none px-4 py-3 max-w-[80%] text-sm leading-relaxed shadow'
+        : 'bg-gray-700 rounded-2xl rounded-tl-none px-4 py-3 max-w-[80%] text-sm leading-relaxed shadow';
+      balao.textContent = texto;
+
+      wrapper.appendChild(balao);
+      chatMsgs.appendChild(wrapper);
+      // Rola automaticamente para a última mensagem
+      chatMsgs.scrollTop = chatMsgs.scrollHeight;
+      return balao;
+    }
+
+    /** Envia o prompt para /gerar e exibe a resposta */
+    async function enviarMensagem() {
+      const prompt = chatInput.value.trim();
+      if (!prompt) return;
+
+      // Trava a UI durante a geração
+      chatInput.disabled = true;
+      sendBtn.disabled   = true;
+      statusMsg.textContent = '⏳ Gerando resposta…';
+
+      adicionarMensagem(prompt, 'user');
+      chatInput.value = '';
+
+      try {
+        const res  = await fetch(API_BASE + '/gerar', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt }),
+        });
+        const data = await res.json();
+
+        adicionarMensagem(data.resposta, 'ia');
+
+        // Salva o TPS da última geração para exibir no card
+        ultimoTps = data.tps;
+        document.getElementById('card-tps').textContent = data.tps + ' t/s';
+        statusMsg.textContent = `✅ ${data.tokens_gerados} tokens em ${data.tempo_s}s · ${data.tps} TPS`;
+      } catch (err) {
+        adicionarMensagem('❌ Erro ao comunicar com o servidor: ' + err.message, 'ia');
+        statusMsg.textContent = '❌ Falha na requisição.';
+      } finally {
+        // Destrava a UI após receber a resposta
+        chatInput.disabled = false;
+        sendBtn.disabled   = false;
+        chatInput.focus();
+      }
+    }
+
+    // Atalho de teclado: Enter envia; Shift+Enter insere nova linha
+    chatInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        enviarMensagem();
+      }
+    });
+  </script>
+
+</body>
+</html>
