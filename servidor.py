@@ -3,6 +3,7 @@ servidor.py — Backend de Inferência Gemma-4-Flex
 Requisitos: FastAPI, Uvicorn, PyTorch, psutil, transformers, flextensor, turboquant
 """
 
+import os
 import time
 import asyncio
 
@@ -185,7 +186,7 @@ async def metricas():
 @app.get("/")
 async def raiz():
     """Serve a interface HTML."""
-    return FileResponse("index.html")
+    return FileResponse(os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html"))
 
 
 if __name__ == "__main__":

@@ -40,4 +40,4 @@ echo ""
 # ---------------------------------------------------------------------------
 # Inicia o servidor
 # ---------------------------------------------------------------------------
-uvicorn servidor:app --host "${HOST}" --port "${PORT}" --reload false
+uvicorn servidor:app --host "${HOST}" --port "${PORT}"
